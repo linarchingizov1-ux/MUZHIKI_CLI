@@ -64,5 +64,5 @@ dart pub global deactivate muzhiki_cli
 ```
 * **Активировать обновленную версию из корня репозитория:**
 ```bash
-dart pub global activate --source git git@github.com:linarchingizov1-ux/MUZHIKI_CLI.git
+dart pub global activate --source git https://github.com/linarchingizov1-ux/MUZHIKI_CLI.git
 ```
