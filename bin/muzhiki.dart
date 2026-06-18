@@ -1,8 +1,8 @@
-import 'package:muzhiki_cli/scripts/debug_type.dart';
-import 'package:muzhiki_cli/scripts/help_type.dart';
-import 'package:muzhiki_cli/scripts/release_type.dart';
-import 'package:muzhiki_cli/utils/script_logger.dart';
-import 'package:muzhiki_cli/utils/script_type.dart';
+import '../lib/scripts/debug_type.dart';
+import '../lib/scripts/help_type.dart';
+import '../lib/scripts/release_type.dart';
+import '../lib/utils/script_logger.dart';
+import '../lib/utils/script_type.dart';
 
 Future<void> main(List<String> arguments) async {
   switch (arguments.runner) {
