@@ -97,124 +97,123 @@ class GitService {
     ScriptLogger.showSuccess('Скрипт готов к использованию!');
   }
 
-  static Future<void> runReleaseProccess() async {
-    final branchResult = await run("git", ["branch", "--show-current"]);
+static Future runReleaseProccess() async {
+  final branchResult = await run("git", ["branch", "--show-current"]);
+  final currentBranch = branchResult.stdout.toString().trim();
 
-    final currentBranch = branchResult.stdout.toString().trim();
-
-    if (!currentBranch.startsWith("debug/")) {
-      ScriptLogger.showError("Release можно запускать только из debug ветки");
-      return;
-    }
-
-    final version = currentBranch.replaceFirst("debug/", "");
-
-    final debugTag = "debug-start-$version";
-
-    ScriptLogger.showBuild("Получаем список коммитов релиза");
-
-    final commitsResult = await run("git", [
-      "log",
-      "$debugTag..HEAD",
-      "--pretty=format:%s",
-    ]);
-
-    final commits = commitsResult.stdout
-        .toString()
-        .split("\n")
-        .map((e) => e.trim())
-        .where(
-          (e) =>
-              e.startsWith("feat:") ||
-              e.startsWith("fix:") ||
-              e.startsWith("breaking:"),
-        )
-        .toList();
-
-    if (commits.isEmpty) {
-      ScriptLogger.showError("Не найдено feat/fix/breaking коммитов");
-      return;
-    }
-
-    VersionType bump = VersionType.patch;
-
-    if (commits.any((e) => e.startsWith("breaking:"))) {
-      bump = VersionType.major;
-    } else if (commits.any((e) => e.startsWith("feat:"))) {
-      bump = VersionType.minor;
-    }
-
-    final newVersion = await VersionManager.bumpVersion(bump);
-
-    await VersionManager.setVersion(newVersion);
-
-    final releaseNotes = ChangelogGenerator.generate(
-      version: newVersion,
-      commits: commits,
-    );
-    
-    final file = File("CHANGELOG.md");
-    
-    final oldContent = await file.exists()
-        ? await file.readAsString()
-        : "";
-    
-    final newContent = """
-    $releaseNotes$oldContent
-    """;
-    
-    await file.writeAsString(newContent);
-
-    final releaseBranch =
-        "release/v${newVersion.major}"
-        ".${newVersion.minor}"
-        ".${newVersion.patch}"
-        "-build-${newVersion.build}";
-
-    await run("git", ["checkout", "-b", releaseBranch]);
-
-    await run("git", ["add", "pubspec.yaml", "CHANGELOG.md"]);
-
-    await run("git", [
-      "commit",
-      "-m",
-      "chore: release ${newVersion.major}.${newVersion.minor}.${newVersion.patch}",
-    ]);
-
-    final releaseTag =
-        "v${newVersion.major}"
-        ".${newVersion.minor}"
-        ".${newVersion.patch}";
-
-    await run("git", ["tag", "-a", releaseTag, "-m", "Release $releaseTag"]);
-
-    await run("git", ["push", "-u", "origin", releaseBranch]);
-
-    await run("git", ["push", "origin", releaseTag]);
-
-    await run("git", ["checkout", releaseBranch]);
-
-    await run("git", ["branch", "-D", currentBranch]);
-
-    await run("git", ["push", "origin", "--delete", currentBranch]);
-
-    await File(".release_notes.md").writeAsString(releaseNotes);
-
-    await run("gh", [
-      "pr",
-      "create",
-      "--base",
-      "master",
-      "--head",
-      releaseBranch,
-      "--title",
-      "Release $releaseTag",
-      "--body-file",
-      ".release_notes.md",
-    ]);
-
-    ScriptLogger.showSuccess("Найдено ${commits.length} релизных коммитов");
+  if (!currentBranch.startsWith("debug/")) {
+    ScriptLogger.showError("Release можно запускать только из debug ветки");
+    return;
   }
+
+  final version = currentBranch.replaceFirst("debug/", "");
+  final debugTag = "debug-start-$version";
+
+  ScriptLogger.showBuild("Получаем список коммитов релиза");
+
+  final commitsResult = await run("git", [
+    "log",
+    "$debugTag..HEAD",
+    "--pretty=format:%s",
+  ]);
+
+  final commits = commitsResult.stdout
+      .toString()
+      .split("\n")
+      .map((e) => e.trim())
+      .where((e) =>
+          e.startsWith("feat:") ||
+          e.startsWith("fix:") ||
+          e.startsWith("breaking:"))
+      .toList();
+
+  if (commits.isEmpty) {
+    ScriptLogger.showError("Не найдено feat/fix/breaking коммитов");
+    return;
+  }
+
+  VersionType bump = VersionType.patch;
+
+  if (commits.any((e) => e.startsWith("breaking:"))) {
+    bump = VersionType.major;
+  } else if (commits.any((e) => e.startsWith("feat:"))) {
+    bump = VersionType.minor;
+  }
+
+  final newVersion = await VersionManager.bumpVersion(bump);
+  await VersionManager.setVersion(newVersion);
+
+  final versionString =
+      "${newVersion.major}.${newVersion.minor}.${newVersion.patch}";
+
+  final releaseTag = "v$versionString";
+
+  final releaseBranch =
+      "release/$releaseTag-build-${newVersion.build}";
+
+  final releaseNotes = ChangelogGenerator.generate(
+    version: newVersion,
+    commits: commits,
+  );
+
+
+  final file = File("CHANGELOG.md");
+
+  final oldContent = await file.exists()
+      ? await file.readAsString()
+      : "";
+
+  await file.writeAsString("""
+$releaseNotes
+$oldContent
+""");
+
+
+  await run("git", ["checkout", "-b", releaseBranch]);
+
+  await run("git", ["add", "pubspec.yaml", "CHANGELOG.md"]);
+
+  await run(
+    "git",
+    ["commit", "-m", "chore: release $versionString"],
+  );
+
+  await run("git", ["tag", "-a", releaseTag, "-m", "Release $releaseTag"]);
+
+  await run("git", ["push", "-u", "origin", releaseBranch]);
+  await run("git", ["push", "origin", releaseTag]);
+
+  await File(".release_notes.md").writeAsString(releaseNotes);
+  await run("git", ["checkout", "master"]);
+
+  await run("git", ["branch", "-D", currentBranch]);
+
+  await run("git", [
+    "push",
+    "origin",
+    "--delete",
+    currentBranch,
+  ]).catchError((e) {
+    ScriptLogger.showError("Ошибка при удалении ветки в репозитории: $e");
+  });
+
+  await run("gh", [
+    "pr",
+    "create",
+    "--base",
+    "master",
+    "--head",
+    releaseBranch,
+    "--title",
+    "Release $releaseTag",
+    "--body-file",
+    ".release_notes.md",
+  ]);
+
+  ScriptLogger.showSuccess(
+    "Release готов: $releaseTag (${commits.length} commits)",
+  );
+}
 
   static Future<void> runDebugProccess() async {
     final result = await checkout();
