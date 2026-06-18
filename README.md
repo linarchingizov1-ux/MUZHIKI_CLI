@@ -55,16 +55,14 @@ gh auth login
 ### Полезные команды
 
 * **Посмотреть список активных пакетов (узнать, из какого проекта запущен):**
-  ```bash
-  dart pub global list
-  ```
+```bash
+dart pub global list
+```
 * **Деактивировать старую версию (деактивируй все что покажет из мужики чтобы пакет работал с репозитория):**
-  ```bash
-  dart pub global deactivate muzhiki_cli
-  ```
+```bash
+dart pub global deactivate muzhiki_cli
+```
 * **Активировать обновленную версию из корня репозитория:**
-  ```bash
-dart pub global activate \
-  --source git \
-  git@github.com:linarchingizov1-ux/MUZHIKI_CLI.git
-  ```
+```bash
+dart pub global activate --source git git@github.com:linarchingizov1-ux/MUZHIKI_CLI.git
+```
