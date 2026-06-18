@@ -9,4 +9,4 @@ dependencies:
   ansi_colorizer: ^1.1.3
 
 executables:
-  muzhiki:
+  muzhiki: lib/muzhiki
