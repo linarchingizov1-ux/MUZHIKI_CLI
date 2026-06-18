@@ -152,8 +152,18 @@ class GitService {
       version: newVersion,
       commits: commits,
     );
-
-    await File("CHANGELOG.md").writeAsString(releaseNotes);
+    
+    final file = File("CHANGELOG.md");
+    
+    final oldContent = await file.exists()
+        ? await file.readAsString()
+        : "";
+    
+    final newContent = """
+    $releaseNotes$oldContent
+    """;
+    
+    await file.writeAsString(newContent);
 
     final releaseBranch =
         "release/v${newVersion.major}"
