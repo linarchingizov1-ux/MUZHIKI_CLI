@@ -24,7 +24,7 @@ class GitService {
     return result;
   }
 
-  static Future<String> getDefaultBranch() async {
+  static Future<String> getMainBranch() async {
     final result = await run("git", [
       "symbolic-ref",
       "refs/remotes/origin/HEAD",
@@ -98,10 +98,11 @@ class GitService {
   }
 
 static Future runReleaseProccess() async {
-  ScriptLogger.showBuild("Определяем HEAD...");
-  final remoteHeadResult = await run("git", ["rev-parse", "--abbrev-ref", "origin/HEAD"]);
-  final remoteHead = remoteHeadResult.stdout.toString().trim();
-  ScriptLogger.showSuccess("Успешно, текущая главная ветка $remoteHead");
+  final mainBranch = await getDefaultBranch();
+  
+  ScriptLogger.showSuccess(
+    "Успешно, текущая главная ветка $mainBranch",
+  );
   ScriptLogger.showBuild("Берем текущую главную ветку...");
   final branchResult = await run("git", ["branch", "--show-current"]);
   final currentBranch = branchResult.stdout.toString().trim();
@@ -176,7 +177,14 @@ static Future runReleaseProccess() async {
 $releaseNotes
 $oldContent
 """);
-  await run("git", ["checkout", "-b", releaseBranch]);
+  try {
+    await run("git", ["checkout", "-b", releaseBranch]);
+  } catch (_) {
+    ScriptLogger.showError(
+      "Релизная ветка уже существует",
+    );
+    return;
+  }
   ScriptLogger.showBuild("Переключаемся на релизную ветку $releaseBranch...");
   ScriptLogger.showBuild("Добавляем версию и изменения в релиз...");
   await run("git", ["add", "pubspec.yaml", "CHANGELOG.md"]);
@@ -197,25 +205,48 @@ $oldContent
   await run("gh", [
     "pr",
     "create",
+    "--base", mainBranch,
     "--head", releaseBranch,
     "--title", "Release $releaseTag",
     "--body-file", ".release_notes.md",
   ]);
 
   ScriptLogger.showBuild("Переключаемся на главную ветку");
-  await run("git", ["checkout", mainBranchName]);
+  try {
+    await run("git", ["checkout", mainBranch]);
+  } catch (e) {
+    ScriptLogger.showError(
+      "Не удалось переключиться на $mainBranch",
+    );
+    return;
+  }
   
   ScriptLogger.showBuild("Удаляем локально ветку $debugBranch");
   await run("git", ["branch", "-D", debugBranch]);
   ScriptLogger.showBuild("Удаляем удаленную ветку $debugBranch");
-  await run("git", [
+  try {
+      await run("git", [
     "push",
     "origin",
     "--delete",
     debugBranch,
-  ]).catchError((e) {
+  ])
+  } catch (e) {
     ScriptLogger.showError("Ошибка при удалении ветки $debugBranch: $e");
-  });
+    return;
+  }
+
+    try {
+await run("git", [
+  "branch",
+  "-D",
+  debugBranch,
+])
+  } catch (e) {
+    ScriptLogger.showError("Ошибка при удалении ветки $debugBranch: $e");
+    return;
+  }
+
 
   ScriptLogger.showSuccess(
     "Успешно! Релиз $releaseTag создан (${commits.length} commits), debug ветка удалена",
