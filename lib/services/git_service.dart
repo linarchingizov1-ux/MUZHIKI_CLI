@@ -98,9 +98,12 @@ class GitService {
   }
 
 static Future runReleaseProccess() async {
+  ScriptLogger.showBuild("Определяем HEAD...");
+  final remoteHeadResult = await run("git", ["rev-parse", "--abbrev-ref", "origin/HEAD"]);
+  final remoteHead = remoteHeadResult.stdout.toString().trim();
+  ScriptLogger.showSuccess("Успешно, текущая главная ветка $remoteHead");
   ScriptLogger.showBuild("Берем текущую главную ветку...");
   final branchResult = await run("git", ["branch", "--show-current"]);
-  ScriptLogger.showSuccess("Успешно, текущая главная ветка $branchResult");
   final currentBranch = branchResult.stdout.toString().trim();
   
   if (!currentBranch.startsWith("debug/")) {
@@ -194,18 +197,14 @@ $oldContent
   await run("gh", [
     "pr",
     "create",
-    "--base",
-    "master",
-    "--head",
-    releaseBranch,
-    "--title",
-    "Release $releaseTag",
-    "--body-file",
-    ".release_notes.md",
+    "--head", releaseBranch,
+    "--title", "Release $releaseTag",
+    "--body-file", ".release_notes.md",
   ]);
 
-  ScriptLogger.showBuild("Переключаемся на мастер");
-  await run("git", ["checkout", "master"]);
+  ScriptLogger.showBuild("Переключаемся на главную ветку");
+  await run("git", ["checkout", mainBranchName]);
+  
   ScriptLogger.showBuild("Удаляем локально ветку $debugBranch");
   await run("git", ["branch", "-D", debugBranch]);
   ScriptLogger.showBuild("Удаляем удаленную ветку $debugBranch");
