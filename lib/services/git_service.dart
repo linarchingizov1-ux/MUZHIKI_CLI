@@ -33,9 +33,15 @@ class GitService {
     return result.stdout.toString().trim().split("/").last;
   }
 
+  static Future<String> getCurrentBranch() async {
+    final result = await run("git", ["branch", "--show-current"]);
+
+    return result.stdout.toString().trim();
+  }
+
   static Future<bool> checkout() async {
     try {
-      final defaultBranch = await getDefaultBranch();
+      final defaultBranch = await getMainBranch();
 
       ScriptLogger.showBuild("Переключаемся на ветку $defaultBranch");
 
@@ -97,182 +103,182 @@ class GitService {
     ScriptLogger.showSuccess('Скрипт готов к использованию!');
   }
 
-static Future runReleaseProccess() async {
-  final mainBranch = await getDefaultBranch();
-  
-  ScriptLogger.showSuccess(
-    "Успешно, текущая главная ветка $mainBranch",
-  );
-  ScriptLogger.showBuild("Берем текущую главную ветку...");
-  final branchResult = await run("git", ["branch", "--show-current"]);
-  final currentBranch = branchResult.stdout.toString().trim();
-  
-  if (!currentBranch.startsWith("debug/")) {
-    ScriptLogger.showError("Release можно запускать только из debug ветки");
-    return;
-  }
-  ScriptLogger.showBuild("Идет процесс создания релизной ветки");
-  final version = currentBranch.replaceFirst("debug/", "");
-  final debugBranch = currentBranch;
+  static Future<void> runReleaseProccess() async {
+    final mainBranch = await getMainBranch();
 
-  final debugTag = "debug-start-$version";
+    ScriptLogger.showBuild("Берем текущую главную ветку...");
+    ScriptLogger.showSuccess("Успешно, текущая главная ветка $mainBranch");
 
-  ScriptLogger.showBuild("Получаем список коммитов релиза");
+    final currentBranch = await getCurrentBranch();
 
-  final commitsResult = await run("git", [
-    "log",
-    "$debugTag..HEAD",
-    "--pretty=format:%s",
-  ]);
+    if (!currentBranch.startsWith("debug/")) {
+      ScriptLogger.showError("Release можно запускать только из debug ветки");
+      return;
+    }
 
-  final commits = commitsResult.stdout
-      .toString()
-      .split("\n")
-      .map((e) => e.trim())
-      .where((e) =>
-          e.startsWith("feat:") ||
-          e.startsWith("fix:") ||
-          e.startsWith("breaking:"))
-      .toList();
+    final debugBranch = currentBranch;
+    final version = currentBranch.replaceFirst("debug/", "");
+    final debugTag = "debug-start-$version";
 
-  if (commits.isEmpty) {
-    ScriptLogger.showError("Не найдено feat/fix/breaking коммитов");
-    return;
-  }
+    ScriptLogger.showBuild("Получаем список коммитов релиза");
 
-  VersionType bump = VersionType.patch;
+    final commitsResult = await run("git", [
+      "log",
+      "$debugTag..HEAD",
+      "--pretty=format:%s",
+    ]);
 
-  if (commits.any((e) => e.startsWith("breaking:"))) {
-    bump = VersionType.major;
-  } else if (commits.any((e) => e.startsWith("feat:"))) {
-    bump = VersionType.minor;
-  }
+    final commits = commitsResult.stdout
+        .toString()
+        .split("\n")
+        .map((e) => e.trim())
+        .where(
+          (e) =>
+              e.startsWith("feat:") ||
+              e.startsWith("fix:") ||
+              e.startsWith("breaking:"),
+        )
+        .toList();
 
-  final newVersion = await VersionManager.bumpVersion(bump);
-  await VersionManager.setVersion(newVersion);
+    if (commits.isEmpty) {
+      ScriptLogger.showError("Не найдено feat/fix/breaking коммитов");
+      return;
+    }
 
-  final versionString =
-      "${newVersion.major}.${newVersion.minor}.${newVersion.patch}";
+    VersionType bump = VersionType.patch;
 
-  final releaseTag = "v$versionString";
+    if (commits.any((e) => e.startsWith("breaking:"))) {
+      bump = VersionType.major;
+    } else if (commits.any((e) => e.startsWith("feat:"))) {
+      bump = VersionType.minor;
+    }
 
-  final releaseBranch =
-      "release/$releaseTag-build-${newVersion.build}";
-  ScriptLogger.showSuccess("Успешно, текущая релизная ветка $releaseBranch");
+    final newVersion = await VersionManager.bumpVersion(bump);
 
-  final releaseNotes = ChangelogGenerator.generate(
-    version: newVersion,
-    commits: commits,
-  );
+    await VersionManager.setVersion(newVersion);
 
-  ScriptLogger.showBuild("Генерируем и берем текущий CHANGELOG.md");
+    final versionString =
+        "${newVersion.major}."
+        "${newVersion.minor}."
+        "${newVersion.patch}";
 
-  final file = File("CHANGELOG.md");
-  ScriptLogger.showBuild("Берем все что нашли...");
-  final oldContent = await file.exists()
-      ? await file.readAsString()
-      : "";
-  ScriptLogger.showBuild("Формируем новый вместе со старыми изменения версий ...");
-  await file.writeAsString("""
+    final releaseTag = "v$versionString";
+
+    final releaseBranch = "release/$releaseTag-build-${newVersion.build}";
+
+    ScriptLogger.showBuild("Идет процесс создания релизной ветки");
+
+    final branchExists = await run("git", ["branch", "--list", releaseBranch]);
+
+    if (branchExists.stdout.toString().trim().isNotEmpty) {
+      ScriptLogger.showError("Релизная ветка уже существует");
+      return;
+    }
+
+    final tagExists = await run("git", ["tag", "-l", releaseTag]);
+
+    if (tagExists.stdout.toString().trim().isNotEmpty) {
+      ScriptLogger.showError("Тег $releaseTag уже существует");
+      return;
+    }
+
+    ScriptLogger.showSuccess("Успешно, текущая релизная ветка $releaseBranch");
+
+    final releaseNotes = ChangelogGenerator.generate(
+      version: newVersion,
+      commits: commits,
+    );
+
+    ScriptLogger.showBuild("Генерируем и берем текущий CHANGELOG.md");
+
+    final changelogFile = File("CHANGELOG.md");
+
+    final oldContent = await changelogFile.exists()
+        ? await changelogFile.readAsString()
+        : "";
+
+    await changelogFile.writeAsString("""
 $releaseNotes
+
 $oldContent
 """);
-  try {
+
     await run("git", ["checkout", "-b", releaseBranch]);
-  } catch (_) {
-    ScriptLogger.showError(
-      "Релизная ветка уже существует",
+
+    ScriptLogger.showBuild("Переключаемся на релизную ветку $releaseBranch");
+
+    ScriptLogger.showBuild("Добавляем версию и изменения в релиз");
+
+    await run("git", ["add", "pubspec.yaml", "CHANGELOG.md"]);
+
+    final status = await run("git", ["status", "--porcelain"]);
+
+    if (status.stdout.toString().trim().isNotEmpty) {
+      await run("git", ["commit", "-m", "chore: release $versionString"]);
+    }
+
+    ScriptLogger.showBuild("Добавляем релизный тег");
+
+    await run("git", ["tag", "-a", releaseTag, "-m", "Release $releaseTag"]);
+
+    ScriptLogger.showBuild(
+      "Отправляем на удаленный репозиторий релизную ветку",
     );
-    return;
+
+    await run("git", ["push", "-u", "origin", releaseBranch]);
+
+    ScriptLogger.showBuild("Отправляем на удаленный репозиторий релизный тег");
+
+    await run("git", ["push", "origin", releaseTag]);
+
+    ScriptLogger.showBuild("Создаем PR");
+
+    await run("gh", [
+      "pr",
+      "create",
+      "--base",
+      mainBranch,
+      "--head",
+      releaseBranch,
+      "--title",
+      "Release $releaseTag",
+      "--body",
+      releaseNotes,
+    ]);
+
+    ScriptLogger.showBuild("Переключаемся на ветку $mainBranch");
+
+    await run("git", ["checkout", mainBranch]);
+
+    ScriptLogger.showBuild("Удаляем локально ветку $debugBranch");
+
+    try {
+      await run("git", ["branch", "-D", debugBranch]);
+    } catch (e) {
+      ScriptLogger.showError(
+        "Не удалось удалить локальную ветку "
+        "$debugBranch: $e",
+      );
+    }
+
+    ScriptLogger.showBuild("Удаляем удаленную ветку $debugBranch");
+
+    try {
+      await run("git", ["push", "origin", "--delete", debugBranch]);
+    } catch (e) {
+      ScriptLogger.showError(
+        "Не удалось удалить удаленную ветку "
+        "$debugBranch: $e",
+      );
+    }
+
+    ScriptLogger.showSuccess(
+      "Успешно! Релиз $releaseTag создан "
+      "(${commits.length} commits). "
+      "Pull Request создан, debug ветка удалена.",
+    );
   }
-  ScriptLogger.showBuild("Переключаемся на релизную ветку $releaseBranch...");
- ScriptLogger.showBuild("Добавляем версию и изменения в релиз...");
-await run("git", ["add", "pubspec.yaml", "CHANGELOG.md"]);
 
-await run("git", [
-  "commit",
-  "-m",
-  "chore: release $versionString",
-]);
-
-ScriptLogger.showBuild("Добавляем релизный тег...");
-await run("git", [
-  "tag",
-  "-a",
-  releaseTag,
-  "-m",
-  "Release $releaseTag",
-]);
-
-ScriptLogger.showBuild("Отправляем на удаленный репозиторий релизную ветку...");
-await run("git", ["push", "-u", "origin", releaseBranch]);
-
-ScriptLogger.showBuild("Отправляем на удаленный репозиторий релизный тег...");
-await run("git", ["push", "origin", releaseTag]);
-
-ScriptLogger.showBuild("Генерируем release notes...");
-await File(".release_notes.md").writeAsString(releaseNotes);
-
-ScriptLogger.showBuild("Создаем PR...");
-await run("gh", [
-  "pr",
-  "create",
-  "--base",
-  mainBranch,
-  "--head",
-  releaseBranch,
-  "--title",
-  "Release $releaseTag",
-  "--body",
-  releaseNotes,
-]);
-
-final releaseNotesFile = File(".release_notes.md");
-if (await releaseNotesFile.exists()) {
-  await releaseNotesFile.delete();
-}
-
-ScriptLogger.showBuild("Переключаемся на ветку $mainBranch");
-
-try {
-  await run("git", ["checkout", mainBranch]);
-} catch (e) {
-  ScriptLogger.showError(
-    "Не удалось переключиться на ветку $mainBranch: $e",
-  );
-  return;
-}
-
-ScriptLogger.showBuild("Удаляем локально ветку $debugBranch");
-
-try {
-  await run("git", ["branch", "-D", debugBranch]);
-} catch (e) {
-  ScriptLogger.showError(
-    "Не удалось удалить локальную ветку $debugBranch: $e",
-  );
-}
-
-ScriptLogger.showBuild("Удаляем удаленную ветку $debugBranch");
-
-try {
-  await run("git", [
-    "push",
-    "origin",
-    "--delete",
-    debugBranch,
-  ]);
-} catch (e) {
-  ScriptLogger.showError(
-    "Не удалось удалить удаленную ветку $debugBranch: $e",
-  );
-}
-
-ScriptLogger.showSuccess(
-  "Успешно! Релиз $releaseTag создан (${commits.length} commits). "
-  "Pull Request создан, debug ветка удалена.",
-);
-}
   static Future<void> runDebugProccess() async {
     final result = await checkout();
 
