@@ -24,79 +24,35 @@ class GitService {
     return result;
   }
 
+  static Future<String?> _getLatestBranch(String pattern) async {
+    final result = await run('git', [
+      'branch',
+      '--list',
+      pattern,
+      '--sort=v:refname',
+    ]);
+
+    final output = result.stdout.toString().trim();
+    if (output.isEmpty) return null;
+
+    final lines = output
+        .split('\n')
+        .map((line) => line.trim())
+        .where((line) => line.isNotEmpty)
+        .toList();
+
+    if (lines.isEmpty) return null;
+
+    final cleanestName = lines.last.replaceAll('*', '').trim();
+    return cleanestName;
+  }
+
   static Future fix() async {
-    final mainBranch = await getMainBranch();
+    final release = await _getLatestBranch("debug/v*");
+    final debug = await _getLatestBranch("release/v*");
 
-    await run("git", ["fetch", "--all", "--prune"]);
-    await run("git", ["checkout", mainBranch]);
-
-    Future<String?> getLatestBranch(String prefix) async {
-      final result = await run("git", [
-        "for-each-ref",
-        "--sort=-committerdate",
-        "--format=%(refname:short)",
-        "refs/heads/$prefix",
-      ]);
-
-      final branches = result.stdout
-          .toString()
-          .split("\n")
-          .map((e) => e.trim())
-          .where((e) => e.startsWith("$prefix/"))
-          .toList();
-
-      return branches.isEmpty ? null : branches.first;
-    }
-
-    Future<void> deleteBranch(String branch) async {
-      await run("git", [
-        "push",
-        "origin",
-        "--delete",
-        branch,
-      ]).catchError((_) {});
-
-      await run("git", ["branch", "-D", branch]).catchError((_) {});
-    }
-
-    Future<void> deleteTag(String tag) async {
-      await run("git", ["push", "origin", "--delete", tag]).catchError((_) {});
-
-      await run("git", ["tag", "-d", tag]).catchError((_) {});
-    }
-
-    final releaseBranch = await getLatestBranch("release");
-
-    if (releaseBranch != null) {
-      final releaseTag = releaseBranch
-          .replaceFirst("release/", "")
-          .split("-build-")
-          .first;
-
-      ScriptLogger.showBuild("Удаляем release ветку $releaseBranch");
-
-      await deleteBranch(releaseBranch);
-
-      ScriptLogger.showBuild("Удаляем release тег $releaseTag");
-
-      await deleteTag(releaseTag);
-    }
-    final debugBranch = await getLatestBranch("debug");
-
-    if (debugBranch != null) {
-      final debugTag = "debug-start-${debugBranch.replaceFirst("debug/", "")}";
-
-      ScriptLogger.showBuild("Удаляем debug ветку $debugBranch");
-
-      await deleteBranch(debugBranch);
-
-      ScriptLogger.showBuild("Удаляем debug тег $debugTag");
-
-      await deleteTag(debugTag);
-    }
-
-    ScriptLogger.showSuccess(
-      "Fix выполнен: release + debug ветки и теги очищены",
+    ScriptLogger.showBuild(
+      "Ветки которые мы нашли для фикса $release и $debug",
     );
   }
 
