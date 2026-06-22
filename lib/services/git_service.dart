@@ -24,43 +24,80 @@ class GitService {
     return result;
   }
 
-  static Future<void> fix() async {
+  static Future fix() async {
     final mainBranch = await getMainBranch();
 
+    await run("git", ["fetch", "--all", "--prune"]);
     await run("git", ["checkout", mainBranch]);
 
-    final branchResult = await run("git", [
-      "for-each-ref",
-      "--sort=-committerdate",
-      "--format=%(refname:short)",
-      "refs/heads/release",
-    ]);
+    Future<String?> getLatestBranch(String prefix) async {
+      final result = await run("git", [
+        "for-each-ref",
+        "--sort=-committerdate",
+        "--format=%(refname:short)",
+        "refs/heads/$prefix",
+      ]);
 
-    final releaseBranch = branchResult.stdout
-        .toString()
-        .split("\n")
-        .map((e) => e.trim())
-        .where((e) => e.startsWith("release/"))
-        .first;
+      final branches = result.stdout
+          .toString()
+          .split("\n")
+          .map((e) => e.trim())
+          .where((e) => e.startsWith("$prefix/"))
+          .toList();
 
-    final releaseTag = releaseBranch
-        .replaceFirst("release/", "")
-        .split("-build-")
-        .first;
+      return branches.isEmpty ? null : branches.first;
+    }
 
-    ScriptLogger.showBuild("Удаляем release ветку $releaseBranch");
+    Future<void> deleteBranch(String branch) async {
+      await run("git", [
+        "push",
+        "origin",
+        "--delete",
+        branch,
+      ]).catchError((_) {});
 
-    await run("git", ["push", "origin", "--delete", releaseBranch]);
+      await run("git", ["branch", "-D", branch]).catchError((_) {});
+    }
 
-    await run("git", ["branch", "-D", releaseBranch]);
+    Future<void> deleteTag(String tag) async {
+      await run("git", ["push", "origin", "--delete", tag]).catchError((_) {});
 
-    ScriptLogger.showBuild("Удаляем тег $releaseTag");
+      await run("git", ["tag", "-d", tag]).catchError((_) {});
+    }
 
-    await run("git", ["push", "origin", "--delete", releaseTag]);
+    final releaseBranch = await getLatestBranch("release");
 
-    await run("git", ["tag", "-d", releaseTag]);
+    if (releaseBranch != null) {
+      final releaseTag = releaseBranch
+          .replaceFirst("release/", "")
+          .split("-build-")
+          .first;
 
-    ScriptLogger.showSuccess("Удалены ветка $releaseBranch и тег $releaseTag");
+      ScriptLogger.showBuild("Удаляем release ветку $releaseBranch");
+
+      await deleteBranch(releaseBranch);
+
+      ScriptLogger.showBuild("Удаляем release тег $releaseTag");
+
+      await deleteTag(releaseTag);
+    }
+    final debugBranch = await getLatestBranch("debug");
+
+    if (debugBranch != null) {
+      final debugTag = "debug-start-${debugBranch.replaceFirst("debug/", "")}";
+
+      ScriptLogger.showBuild("Удаляем debug ветку $debugBranch");
+
+      await deleteBranch(debugBranch);
+
+      ScriptLogger.showBuild("Удаляем debug тег $debugTag");
+
+      await deleteTag(debugTag);
+    }
+
+    ScriptLogger.showSuccess(
+      "Fix выполнен: release + debug ветки и теги очищены",
+    );
   }
 
   static Future<String> getMainBranch() async {
