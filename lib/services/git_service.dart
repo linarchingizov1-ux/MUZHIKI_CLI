@@ -25,26 +25,21 @@ class GitService {
   }
 
   static Future<void> fix() async {
-    // 1. Безопасный увод разработчика на стабильную ветку (чтобы не заблокировать удаление)
     for (final branch in ['master', 'main', 'developer', 'dev']) {
       try {
         await run('git', ['checkout', branch]);
-        break; // Успешно переключились, выходим из цикла
+        break;
       } catch (_) {}
     }
 
-    // Синхронизируем индекс с сервером перед анализом
     try {
       await run('git', ['fetch', '--tags']);
     } catch (_) {}
-
-    // 2. ПОИСК ЛОКАЛЬНЫХ КОМПОНЕНТОВ
     String? localDebug;
     String? localRelease;
     String? localDebugTag;
     String? localReleaseTag;
 
-    // Ищем локальную debug-ветку
     try {
       final res = await run('git', [
         'branch',
@@ -57,7 +52,6 @@ class GitService {
         localDebug = out.split('\n').last.replaceAll('*', '').trim();
     } catch (_) {}
 
-    // Ищем локальную release-ветку
     try {
       final res = await run('git', [
         'branch',
@@ -70,7 +64,6 @@ class GitService {
         localRelease = out.split('\n').last.replaceAll('*', '').trim();
     } catch (_) {}
 
-    // Ищем локальный debug-тег (учитываем маску debug-start-v*)
     try {
       final res = await run('git', [
         'tag',
@@ -82,7 +75,6 @@ class GitService {
       if (out.isNotEmpty) localDebugTag = out.split('\n').last.trim();
     } catch (_) {}
 
-    // Ищем локальный release-тег
     try {
       final res = await run('git', [
         'tag',
@@ -94,7 +86,6 @@ class GitService {
       if (out.isNotEmpty) localReleaseTag = out.split('\n').last.trim();
     } catch (_) {}
 
-    // 3. ПРОВЕРКА НАЛИЧИЯ НА УДАЛЕННОМ СЕРВЕРЕ (ORIGIN)
     bool hasRemoteDebug = false;
     bool hasRemoteRelease = false;
     bool hasRemoteDebugTag = false;
@@ -147,7 +138,7 @@ class GitService {
 
     String fmt(String? name) =>
         (name ?? 'Не найдено').padRight(26).substring(0, 26);
-    String status(bool exist) => exist ? '[  ✓  ]' : '[  ✗  ]';
+    String status(bool exist) => exist ? '[ ✓ ]' : '[ ✗ ]';
 
     ScriptLogger.showBuild(
       "[СБОРКА]: \n"
@@ -160,75 +151,9 @@ class GitService {
       "│ 🏷️  tag rel: ${fmt(localReleaseTag)} │  ${status(hasRemoteReleaseTag)}   │\n"
       "└─────────────────────────────────┴────────────┘",
     );
-
-    if (localDebug != null || localDebugTag != null) {
-      ScriptLogger.showBuild(
-        "[СБОРКА]: Удаление конфликтующих компонентов debug...",
-      );
-
-      if (localDebug != null) {
-        try {
-          await run('git', ['branch', '-D', localDebug]);
-        } catch (_) {}
-        if (hasRemoteDebug) {
-          try {
-            await run('git', ['push', 'origin', '--delete', localDebug]);
-          } catch (_) {}
-        }
-      }
-      if (localDebugTag != null) {
-        try {
-          await run('git', ['tag', '-d', localDebugTag]);
-        } catch (_) {}
-        if (hasRemoteDebugTag) {
-          try {
-            await run('git', [
-              'push',
-              'origin',
-              '--delete',
-              'refs/tags/$localDebugTag',
-            ]);
-          } catch (_) {}
-        }
-      }
-    }
-
-    if (localRelease != null || localReleaseTag != null) {
-      ScriptLogger.showBuild(
-        "[СБОРКА]: Удаление конфликтующих компонентов release...",
-      );
-
-      if (localRelease != null) {
-        try {
-          await run('git', ['branch', '-D', localRelease]);
-        } catch (_) {}
-        if (hasRemoteRelease) {
-          try {
-            await run('git', ['push', 'origin', '--delete', localRelease]);
-          } catch (_) {}
-        }
-      }
-      if (localReleaseTag != null) {
-        try {
-          await run('git', ['tag', '-d', localReleaseTag]);
-        } catch (_) {}
-        if (hasRemoteReleaseTag) {
-          try {
-            await run('git', [
-              'push',
-              'origin',
-              '--delete',
-              'refs/tags/$localReleaseTag',
-            ]);
-          } catch (_) {}
-        }
-      }
-    }
-
-    try {
-      await run('git', ['fetch', '--prune', '--prune-tags']);
-    } catch (_) {}
-    ScriptLogger.showBuild("[СБОРКА]: Операция фикса полностью завершена.");
+    ScriptLogger.showError(
+      "Если есть проблемы с выполнением команд удали свои последние tag которые ты создал в процессе debug скрипта",
+    );
   }
 
   static Future<String> getMainBranch() async {
