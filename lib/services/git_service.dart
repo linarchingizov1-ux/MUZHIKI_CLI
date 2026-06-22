@@ -232,6 +232,10 @@ $oldContent
     await run("git", ["push", "origin", releaseTag]);
 
     ScriptLogger.showBuild("Создаем PR");
+    ScriptLogger.showBuild("Генерируем release notes...");
+
+    final releaseNotesFile = File(".release_notes.md");
+    await releaseNotesFile.writeAsString(releaseNotes);
 
     await run("gh", [
       "pr",
@@ -242,10 +246,13 @@ $oldContent
       releaseBranch,
       "--title",
       "Release $releaseTag",
-      "--body",
-      releaseNotes,
+      "--body-file",
+      ".release_notes.md",
     ]);
 
+    if (await releaseNotesFile.exists()) {
+      await releaseNotesFile.delete();
+    }
     ScriptLogger.showBuild("Переключаемся на ветку $mainBranch");
 
     await run("git", ["checkout", mainBranch]);
