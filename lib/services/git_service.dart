@@ -24,6 +24,45 @@ class GitService {
     return result;
   }
 
+  static Future<void> fix() async {
+    final mainBranch = await getMainBranch();
+
+    await run("git", ["checkout", mainBranch]);
+
+    final branchResult = await run("git", [
+      "for-each-ref",
+      "--sort=-committerdate",
+      "--format=%(refname:short)",
+      "refs/heads/release",
+    ]);
+
+    final releaseBranch = branchResult.stdout
+        .toString()
+        .split("\n")
+        .map((e) => e.trim())
+        .where((e) => e.startsWith("release/"))
+        .first;
+
+    final releaseTag = releaseBranch
+        .replaceFirst("release/", "")
+        .split("-build-")
+        .first;
+
+    ScriptLogger.showBuild("Удаляем release ветку $releaseBranch");
+
+    await run("git", ["push", "origin", "--delete", releaseBranch]);
+
+    await run("git", ["branch", "-D", releaseBranch]);
+
+    ScriptLogger.showBuild("Удаляем тег $releaseTag");
+
+    await run("git", ["push", "origin", "--delete", releaseTag]);
+
+    await run("git", ["tag", "-d", releaseTag]);
+
+    ScriptLogger.showSuccess("Удалены ветка $releaseBranch и тег $releaseTag");
+  }
+
   static Future<String> getMainBranch() async {
     final result = await run("git", [
       "symbolic-ref",
@@ -75,6 +114,17 @@ class GitService {
   • Проверяет чистоту рабочего дерева
   • Создает ветку: debug/vX.Y.Z-build-N
   ''');
+
+    ScriptLogger.showBuild('''
+🛠 Восстановление релиза
+─────────────────────────────────────────
+muzhiki --fix
+• Используется после неудачного релиза
+• Находит последнюю release ветку
+• Автоматически определяет связанный тег
+• Удаляет release ветку локально и в origin
+• Удаляет release тег локально и в origin
+''');
 
     ScriptLogger.showBuild('''
   🚀 Релиз

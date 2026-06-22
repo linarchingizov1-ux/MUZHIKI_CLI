@@ -3,6 +3,7 @@ import '../lib/scripts/help_type.dart';
 import '../lib/scripts/release_type.dart';
 import '../lib/utils/script_logger.dart';
 import '../lib/utils/script_type.dart';
+import '../lib/scripts/fix_type.dart';
 
 Future<void> main(List<String> arguments) async {
   switch (arguments.runner) {
@@ -23,5 +24,7 @@ Future<void> main(List<String> arguments) async {
         '--release\n'
         '--help',
       );
+    case ScriptType.fix:
+      await FixType.fix();
   }
 }
