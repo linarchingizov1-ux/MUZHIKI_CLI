@@ -25,132 +25,210 @@ class GitService {
   }
 
   static Future<void> fix() async {
-    final localDebug = await _getLatestBranch("debug/v*", isRemote: false);
-    final localRelease = await _getLatestBranch("release/v*", isRemote: false);
-    final localDebugTag = await _getLatestTag("v*-build-*", isRemote: false);
-    final localReleaseTag = await _getLatestTag("v*-build-*", isRemote: false);
+    // 1. Безопасный увод разработчика на стабильную ветку (чтобы не заблокировать удаление)
+    for (final branch in ['master', 'main', 'developer', 'dev']) {
+      try {
+        await run('git', ['checkout', branch]);
+        break; // Успешно переключились, выходим из цикла
+      } catch (_) {}
+    }
 
+    // Синхронизируем индекс с сервером перед анализом
     try {
       await run('git', ['fetch', '--tags']);
     } catch (_) {}
 
-    final hasRemoteDebug =
-        localDebug != null && await _checkRemoteBranchExist(localDebug);
-    final hasRemoteRelease =
-        localRelease != null && await _checkRemoteBranchExist(localRelease);
-    final hasRemoteDebugTag =
-        localDebugTag != null && await _checkRemoteTagExist(localDebugTag);
-    final hasRemoteReleaseTag =
-        localReleaseTag != null && await _checkRemoteTagExist(localReleaseTag);
+    // 2. ПОИСК ЛОКАЛЬНЫХ КОМПОНЕНТОВ
+    String? localDebug;
+    String? localRelease;
+    String? localDebugTag;
+    String? localReleaseTag;
 
-    String fmtName(String? name) =>
-        (name ?? 'Не найдено').padRight(28).substring(0, 28);
-    String fmtStatus(bool exists) => exists ? '[  ✓  ]' : '[  ✗  ]';
-
-    ScriptLogger.showBuild(
-      "\n"
-      "┌─────────────────────────────────┬────────────┐\n"
-      "│ КОМПОНЕНТ (ЛОКАЛЬНО)            │ НА СЕРВЕРЕ │\n"
-      "├─────────────────────────────────┼────────────┤\n"
-      "│ 📁 debug:   ${fmtName(localDebug)} │  ${fmtStatus(hasRemoteDebug)}   │\n"
-      "│ 📁 release: ${fmtName(localRelease)} │  ${fmtStatus(hasRemoteRelease)}   │\n"
-      "│ 🏷️  tag dgb: ${fmtName(localDebugTag)} │  ${fmtStatus(hasRemoteDebugTag)}   │\n"
-      "│ 🏷️  tag rel: ${fmtName(localReleaseTag)} │  ${fmtStatus(hasRemoteReleaseTag)}   │\n"
-      "└─────────────────────────────────┴────────────┘\n"
-      "Если возникли проблемы при создании debug ветки удали тег + ветку локально и удаленно",
-    );
-  }
-
-  static Future<String?> _getLatestBranch(
-    String pattern, {
-    required bool isRemote,
-  }) async {
-    final args = ['branch', '--list'];
-    if (isRemote)
-      args.addAll(['-r', 'origin/$pattern']);
-    else
-      args.add(pattern);
-    args.add('--sort=v:refname');
-
+    // Ищем локальную debug-ветку
     try {
-      final result = await run('git', args);
-      final output = result.stdout.toString().trim();
-      if (output.isEmpty) return null;
+      final res = await run('git', [
+        'branch',
+        '--list',
+        'debug/v*',
+        '--sort=v:refname',
+      ]);
+      final out = res.stdout.toString().trim();
+      if (out.isNotEmpty)
+        localDebug = out.split('\n').last.replaceAll('*', '').trim();
+    } catch (_) {}
 
-      final lines = output
-          .split('\n')
-          .map((l) => l.trim())
-          .where((l) => l.isNotEmpty)
-          .toList();
-      if (lines.isEmpty) return null;
+    // Ищем локальную release-ветку
+    try {
+      final res = await run('git', [
+        'branch',
+        '--list',
+        'release/v*',
+        '--sort=v:refname',
+      ]);
+      final out = res.stdout.toString().trim();
+      if (out.isNotEmpty)
+        localRelease = out.split('\n').last.replaceAll('*', '').trim();
+    } catch (_) {}
 
-      var name = lines.last.replaceAll('*', '').trim();
-      if (isRemote) name = name.replaceFirst('origin/', '');
-      return name;
-    } catch (_) {
-      return null;
+    // Ищем локальный debug-тег (учитываем маску debug-start-v*)
+    try {
+      final res = await run('git', [
+        'tag',
+        '--list',
+        '*debug*v*-build-*',
+        '--sort=v:refname',
+      ]);
+      final out = res.stdout.toString().trim();
+      if (out.isNotEmpty) localDebugTag = out.split('\n').last.trim();
+    } catch (_) {}
+
+    // Ищем локальный release-тег
+    try {
+      final res = await run('git', [
+        'tag',
+        '--list',
+        '*release*v*-build-*',
+        '--sort=v:refname',
+      ]);
+      final out = res.stdout.toString().trim();
+      if (out.isNotEmpty) localReleaseTag = out.split('\n').last.trim();
+    } catch (_) {}
+
+    // 3. ПРОВЕРКА НАЛИЧИЯ НА УДАЛЕННОМ СЕРВЕРЕ (ORIGIN)
+    bool hasRemoteDebug = false;
+    bool hasRemoteRelease = false;
+    bool hasRemoteDebugTag = false;
+    bool hasRemoteReleaseTag = false;
+
+    if (localDebug != null) {
+      try {
+        final res = await run('git', [
+          'ls-remote',
+          '--heads',
+          'origin',
+          localDebug,
+        ]);
+        hasRemoteDebug = res.stdout.toString().trim().isNotEmpty;
+      } catch (_) {}
     }
-  }
-
-  static Future<String?> _getLatestTag(
-    String pattern, {
-    required bool isRemote,
-  }) async {
-    try {
-      if (isRemote) {
-        final result = await run('git', [
+    if (localRelease != null) {
+      try {
+        final res = await run('git', [
+          'ls-remote',
+          '--heads',
+          'origin',
+          localRelease,
+        ]);
+        hasRemoteRelease = res.stdout.toString().trim().isNotEmpty;
+      } catch (_) {}
+    }
+    if (localDebugTag != null) {
+      try {
+        final res = await run('git', [
           'ls-remote',
           '--tags',
           'origin',
-          pattern,
+          localDebugTag,
         ]);
-        final output = result.stdout.toString().trim();
-        if (output.isEmpty) return null;
-        final lines = output.split('\n').where((l) => l.isNotEmpty).toList();
-        final match = RegExp(r'refs/tags/(.+)$').firstMatch(lines.last);
-        return match?.group(1)?.replaceAll('^{}', '').trim();
-      } else {
-        final result = await run('git', [
-          'tag',
-          '--list',
-          pattern,
-          '--sort=v:refname',
+        hasRemoteDebugTag = res.stdout.toString().trim().isNotEmpty;
+      } catch (_) {}
+    }
+    if (localReleaseTag != null) {
+      try {
+        final res = await run('git', [
+          'ls-remote',
+          '--tags',
+          'origin',
+          localReleaseTag,
         ]);
-        final output = result.stdout.toString().trim();
-        if (output.isEmpty) return null;
-        return output.split('\n').last.trim();
+        hasRemoteReleaseTag = res.stdout.toString().trim().isNotEmpty;
+      } catch (_) {}
+    }
+
+    String fmt(String? name) =>
+        (name ?? 'Не найдено').padRight(26).substring(0, 26);
+    String status(bool exist) => exist ? '[  ✓  ]' : '[  ✗  ]';
+
+    ScriptLogger.showBuild(
+      "[СБОРКА]: \n"
+      "┌─────────────────────────────────┬────────────┐\n"
+      "│ КОМПОНЕНТ (ЛОКАЛЬНО)            │ НА СЕРВЕРЕ │\n"
+      "├─────────────────────────────────┼────────────┤\n"
+      "│ 📁 debug:   ${fmt(localDebug)} │  ${status(hasRemoteDebug)}   │\n"
+      "│ 📁 release: ${fmt(localRelease)} │  ${status(hasRemoteRelease)}   │\n"
+      "│ 🏷️  tag dgb: ${fmt(localDebugTag)} │  ${status(hasRemoteDebugTag)}   │\n"
+      "│ 🏷️  tag rel: ${fmt(localReleaseTag)} │  ${status(hasRemoteReleaseTag)}   │\n"
+      "└─────────────────────────────────┴────────────┘",
+    );
+
+    if (localDebug != null || localDebugTag != null) {
+      ScriptLogger.showBuild(
+        "[СБОРКА]: Удаление конфликтующих компонентов debug...",
+      );
+
+      if (localDebug != null) {
+        try {
+          await run('git', ['branch', '-D', localDebug]);
+        } catch (_) {}
+        if (hasRemoteDebug) {
+          try {
+            await run('git', ['push', 'origin', '--delete', localDebug]);
+          } catch (_) {}
+        }
       }
-    } catch (_) {
-      return null;
+      if (localDebugTag != null) {
+        try {
+          await run('git', ['tag', '-d', localDebugTag]);
+        } catch (_) {}
+        if (hasRemoteDebugTag) {
+          try {
+            await run('git', [
+              'push',
+              'origin',
+              '--delete',
+              'refs/tags/$localDebugTag',
+            ]);
+          } catch (_) {}
+        }
+      }
     }
-  }
 
-  static Future<bool> _checkRemoteBranchExist(String branchName) async {
-    try {
-      final result = await run('git', [
-        'ls-remote',
-        '--heads',
-        'origin',
-        branchName,
-      ]);
-      return result.stdout.toString().trim().isNotEmpty;
-    } catch (_) {
-      return false;
-    }
-  }
+    if (localRelease != null || localReleaseTag != null) {
+      ScriptLogger.showBuild(
+        "[СБОРКА]: Удаление конфликтующих компонентов release...",
+      );
 
-  static Future<bool> _checkRemoteTagExist(String tagName) async {
-    try {
-      final result = await run('git', [
-        'ls-remote',
-        '--tags',
-        'origin',
-        tagName,
-      ]);
-      return result.stdout.toString().trim().isNotEmpty;
-    } catch (_) {
-      return false;
+      if (localRelease != null) {
+        try {
+          await run('git', ['branch', '-D', localRelease]);
+        } catch (_) {}
+        if (hasRemoteRelease) {
+          try {
+            await run('git', ['push', 'origin', '--delete', localRelease]);
+          } catch (_) {}
+        }
+      }
+      if (localReleaseTag != null) {
+        try {
+          await run('git', ['tag', '-d', localReleaseTag]);
+        } catch (_) {}
+        if (hasRemoteReleaseTag) {
+          try {
+            await run('git', [
+              'push',
+              'origin',
+              '--delete',
+              'refs/tags/$localReleaseTag',
+            ]);
+          } catch (_) {}
+        }
+      }
     }
+
+    try {
+      await run('git', ['fetch', '--prune', '--prune-tags']);
+    } catch (_) {}
+    ScriptLogger.showBuild("[СБОРКА]: Операция фикса полностью завершена.");
   }
 
   static Future<String> getMainBranch() async {
