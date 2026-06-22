@@ -24,36 +24,133 @@ class GitService {
     return result;
   }
 
-  static Future<String?> _getLatestBranch(String pattern) async {
-    final result = await run('git', [
-      'branch',
-      '--list',
-      pattern,
-      '--sort=v:refname',
-    ]);
+  static Future<void> fix() async {
+    final localDebug = await _getLatestBranch("debug/v*", isRemote: false);
+    final localRelease = await _getLatestBranch("release/v*", isRemote: false);
+    final localDebugTag = await _getLatestTag("v*-build-*", isRemote: false);
+    final localReleaseTag = await _getLatestTag("v*-build-*", isRemote: false);
 
-    final output = result.stdout.toString().trim();
-    if (output.isEmpty) return null;
+    try {
+      await run('git', ['fetch', '--tags']);
+    } catch (_) {}
 
-    final lines = output
-        .split('\n')
-        .map((line) => line.trim())
-        .where((line) => line.isNotEmpty)
-        .toList();
+    final hasRemoteDebug =
+        localDebug != null && await _checkRemoteBranchExist(localDebug);
+    final hasRemoteRelease =
+        localRelease != null && await _checkRemoteBranchExist(localRelease);
+    final hasRemoteDebugTag =
+        localDebugTag != null && await _checkRemoteTagExist(localDebugTag);
+    final hasRemoteReleaseTag =
+        localReleaseTag != null && await _checkRemoteTagExist(localReleaseTag);
 
-    if (lines.isEmpty) return null;
-
-    final cleanestName = lines.last.replaceAll('*', '').trim();
-    return cleanestName;
-  }
-
-  static Future fix() async {
-    final release = await _getLatestBranch("debug/v*");
-    final debug = await _getLatestBranch("release/v*");
+    String fmtName(String? name) =>
+        (name ?? 'Не найдено').padRight(28).substring(0, 28);
+    String fmtStatus(bool exists) => exists ? '[  ✓  ]' : '[  ✗  ]';
 
     ScriptLogger.showBuild(
-      "Ветки которые мы нашли для фикса $release и $debug",
+      "\n"
+      "┌─────────────────────────────────┬────────────┐\n"
+      "│ КОМПОНЕНТ (ЛОКАЛЬНО)            │ НА СЕРВЕРЕ │\n"
+      "├─────────────────────────────────┼────────────┤\n"
+      "│ 📁 debug:   ${fmtName(localDebug)} │  ${fmtStatus(hasRemoteDebug)}   │\n"
+      "│ 📁 release: ${fmtName(localRelease)} │  ${fmtStatus(hasRemoteRelease)}   │\n"
+      "│ 🏷️  tag dgb: ${fmtName(localDebugTag)} │  ${fmtStatus(hasRemoteDebugTag)}   │\n"
+      "│ 🏷️  tag rel: ${fmtName(localReleaseTag)} │  ${fmtStatus(hasRemoteReleaseTag)}   │\n"
+      "└─────────────────────────────────┴────────────┘\n"
+      "Если возникли проблемы при создании debug ветки удали тег + ветку локально и удаленно",
     );
+  }
+
+  static Future<String?> _getLatestBranch(
+    String pattern, {
+    required bool isRemote,
+  }) async {
+    final args = ['branch', '--list'];
+    if (isRemote)
+      args.addAll(['-r', 'origin/$pattern']);
+    else
+      args.add(pattern);
+    args.add('--sort=v:refname');
+
+    try {
+      final result = await run('git', args);
+      final output = result.stdout.toString().trim();
+      if (output.isEmpty) return null;
+
+      final lines = output
+          .split('\n')
+          .map((l) => l.trim())
+          .where((l) => l.isNotEmpty)
+          .toList();
+      if (lines.isEmpty) return null;
+
+      var name = lines.last.replaceAll('*', '').trim();
+      if (isRemote) name = name.replaceFirst('origin/', '');
+      return name;
+    } catch (_) {
+      return null;
+    }
+  }
+
+  static Future<String?> _getLatestTag(
+    String pattern, {
+    required bool isRemote,
+  }) async {
+    try {
+      if (isRemote) {
+        final result = await run('git', [
+          'ls-remote',
+          '--tags',
+          'origin',
+          pattern,
+        ]);
+        final output = result.stdout.toString().trim();
+        if (output.isEmpty) return null;
+        final lines = output.split('\n').where((l) => l.isNotEmpty).toList();
+        final match = RegExp(r'refs/tags/(.+)$').firstMatch(lines.last);
+        return match?.group(1)?.replaceAll('^{}', '').trim();
+      } else {
+        final result = await run('git', [
+          'tag',
+          '--list',
+          pattern,
+          '--sort=v:refname',
+        ]);
+        final output = result.stdout.toString().trim();
+        if (output.isEmpty) return null;
+        return output.split('\n').last.trim();
+      }
+    } catch (_) {
+      return null;
+    }
+  }
+
+  static Future<bool> _checkRemoteBranchExist(String branchName) async {
+    try {
+      final result = await run('git', [
+        'ls-remote',
+        '--heads',
+        'origin',
+        branchName,
+      ]);
+      return result.stdout.toString().trim().isNotEmpty;
+    } catch (_) {
+      return false;
+    }
+  }
+
+  static Future<bool> _checkRemoteTagExist(String tagName) async {
+    try {
+      final result = await run('git', [
+        'ls-remote',
+        '--tags',
+        'origin',
+        tagName,
+      ]);
+      return result.stdout.toString().trim().isNotEmpty;
+    } catch (_) {
+      return false;
+    }
   }
 
   static Future<String> getMainBranch() async {
