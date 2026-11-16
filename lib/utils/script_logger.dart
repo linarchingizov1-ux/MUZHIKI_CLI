@@ -1,6 +1,7 @@
 import 'package:ansi_colorizer/ansi_colorizer.dart';
 
 class ScriptLogger {
+  const ScriptLogger._();
   static final showBuild =
       const AnsiColorizer(
         foreground: Ansi24BitColor.fromRGB(85, 85, 255),

@@ -5,6 +5,7 @@ import 'version_manager.dart';
 import 'changelog_generator.dart';
 
 class GitService {
+  const GitService._();
   static Future<ProcessResult> run(
     String command,
     List<String> arguments,
@@ -240,6 +241,8 @@ muzhiki --fix
   ║ breaking:     ║ Критические изменения   ║ MAJOR (1.0.0)   ║
   ║ feat:         ║ Новая функциональность  ║ MINOR (0.1.0)   ║
   ║ fix:          ║ Исправление багов       ║ PATCH (0.0.1)   ║
+  ║ perf:         ║ Оптимизация кода        ║ PATCH (0.0.1)   ║
+  ║ ref:          ║ Рефакторинг кода        ║ без изменений   ║
   ╚═══════════════╩═════════════════════════╩═════════════════╝
   ''');
 
@@ -279,7 +282,9 @@ muzhiki --fix
           (e) =>
               e.startsWith("feat:") ||
               e.startsWith("fix:") ||
-              e.startsWith("breaking:"),
+              e.startsWith("breaking:") ||
+              e.startsWith("perf:") ||
+              e.startsWith("ref:"),
         )
         .toList();
 
